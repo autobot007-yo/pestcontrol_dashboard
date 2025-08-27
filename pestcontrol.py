@@ -1,10 +1,15 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import altair as alt
+
+# Initialize session state FIRST (before anything else)
+if 'customers_df' not in st.session_state:
+    st.session_state.customers_df = pd.DataFrame()
+
+if 'show_add_form' not in st.session_state:
+    st.session_state.show_add_form = False
 
 # Page configuration
 st.set_page_config(
@@ -123,19 +128,6 @@ st.markdown("""
         text-align: center;
     }
     
-    /* Sidebar styling */
-    .css-1d391kg {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-    }
-    
-    /* Form styling */
-    .stSelectbox label, .stTextInput label, .stTextArea label, 
-    .stNumberInput label, .stDateInput label, .stCheckbox label {
-        color: white !important;
-        font-weight: 500;
-    }
-    
     /* Button styling */
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -162,11 +154,11 @@ st.markdown("""
         border-bottom: 2px solid rgba(255, 255, 255, 0.2);
     }
     
-    /* Expander styling */
-    .streamlit-expanderHeader {
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 10px;
-        color: white;
+    /* Form styling */
+    .stSelectbox label, .stTextInput label, .stTextArea label, 
+    .stNumberInput label, .stDateInput label, .stCheckbox label {
+        color: white !important;
+        font-weight: 500;
     }
     
     /* Success/Error messages */
@@ -180,212 +172,63 @@ st.markdown("""
         border-left: 4px solid #f44336;
     }
     
-    /* Floating Action Button */
-    .fab {
-        position: fixed;
-        bottom: 30px;
-        right: 30px;
-        width: 70px;
-        height: 70px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 50%;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        z-index: 1000;
-        border: 3px solid rgba(255,255,255,0.2);
-    }
-    
-    .fab:hover {
-        transform: scale(1.1);
-        box-shadow: 0 12px 35px rgba(0,0,0,0.4);
-    }
-    
-    .fab-icon {
-        color: white;
-        font-size: 2rem;
-        font-weight: bold;
-        transition: transform 0.3s ease;
-    }
-    
-    .fab.open .fab-icon {
-        transform: rotate(45deg);
-    }
-    
-    /* Modal Overlay */
-    .modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(5px);
-        z-index: 999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        animation: fadeIn 0.3s ease;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-    
-    /* Modal Content */
-    .modal-content {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    /* Add Customer Section */
+    .add-customer-section {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 20px;
+        border-radius: 15px;
         padding: 2rem;
-        width: 90%;
-        max-width: 500px;
-        max-height: 90vh;
-        overflow-y: auto;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        animation: slideUp 0.3s ease;
+        margin: 2rem 0;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
-    
-    @keyframes slideUp {
-        from { 
-            opacity: 0;
-            transform: translateY(50px);
-        }
-        to { 
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    .modal-header {
-        color: white;
-        font-size: 1.5rem;
-        font-weight: 600;
-        margin-bottom: 1.5rem;
-        text-align: center;
-        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-        padding-bottom: 1rem;
-    }
-    
-    .modal-section {
-        margin: 1.5rem 0;
-    }
-    
-    .modal-section h4 {
-        color: #ffa726;
-        font-size: 1.1rem;
-        font-weight: 500;
-        margin-bottom: 0.8rem;
-        border-left: 3px solid #ffa726;
-        padding-left: 0.8rem;
-    }
-    
-    /* Close button */
-    .close-btn {
-        position: absolute;
-        top: 15px;
-        right: 20px;
-        background: none;
-        border: none;
-        color: rgba(255, 255, 255, 0.7);
-        font-size: 1.5rem;
-        cursor: pointer;
-        transition: color 0.3s ease;
-    }
-    
-    .close-btn:hover {
-        color: white;
-        transform: scale(1.1);
-    }
-    
-""", unsafe_allow_html=True)
-
-# Add JavaScript for FAB functionality
-st.markdown("""
-<script>
-// Make FAB clickable
-document.addEventListener('DOMContentLoaded', function() {
-    // Handle FAB clicks
-    const fabElements = document.querySelectorAll('.fab');
-    fabElements.forEach(fab => {
-        fab.addEventListener('click', function() {
-            // Find and click the hidden Streamlit button
-            const button = document.querySelector('[data-testid="fab"] button');
-            if (button) button.click();
-        });
-    });
-    
-    // Handle modal overlay clicks
-    const modalOverlay = document.querySelector('.modal-overlay');
-    if (modalOverlay) {
-        modalOverlay.addEventListener('click', function(e) {
-            if (e.target === modalOverlay) {
-                const button = document.querySelector('[data-testid="fab"] button');
-                if (button) button.click();
-            }
-        });
-    }
-    
-    // Handle close button clicks
-    const closeBtn = document.querySelector('.close-btn');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', function() {
-            const button = document.querySelector('[data-testid="fab"] button');
-            if (button) button.click();
-        });
-    }
-    
-    // Handle ESC key press
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            const button = document.querySelector('[data-testid="fab"] button');
-            if (button && document.querySelector('.modal-overlay')) {
-                button.click();
-            }
-        }
-    });
-});
-</script>
 </style>
 """, unsafe_allow_html=True)
 
-# Database setup
-def init_database():
-    conn = sqlite3.connect('pestcontrol.db', check_same_thread=False)
-    c = conn.cursor()
+# Sample data function
+@st.cache_data
+def load_sample_data():
+    """Load sample data for demonstration"""
+    sample_data = []
+    services = ["General Pest Control", "Termite Treatment", "Rodent Control", "Mosquito Control", "Cockroach Treatment"]
+    addresses = ["Andheri, Mumbai", "Bandra, Mumbai", "Thane", "Pune", "Nashik", "Aurangabad"]
     
-    # Create the customers table if it doesn't exist
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            phone TEXT,
-            address TEXT,
-            service TEXT,
-            visit_date TEXT,
-            amount REAL,
-            paid INTEGER DEFAULT 0,
-            payment_method TEXT,
-            service_status TEXT DEFAULT 'Ongoing',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Update old "Finished" status to "Completed" for consistency
-    try:
-        c.execute("UPDATE customers SET service_status = 'Completed' WHERE service_status = 'Finished'")
-        conn.commit()
-    except:
-        pass  # Ignore errors if table doesn't exist or no records to update
-    
-    return conn, c
+    for i in range(1, 26):  # 25 sample records
+        sample_data.append({
+            'id': i,
+            'name': f'Customer {i}',
+            'phone': f'+91 98765 {43210 + i}',
+            'address': f'Plot {i}, {addresses[i % len(addresses)]}',
+            'service': services[i % len(services)],
+            'visit_date': datetime.now() - timedelta(days=25-i),
+            'amount': 500 + (i * 200),
+            'paid': 1 if i % 3 != 0 else 0,
+            'payment_method': 'UPI' if i % 2 == 0 else 'Cash',
+            'service_status': 'Completed' if i % 4 == 0 else 'Ongoing',
+            'created_at': datetime.now() - timedelta(days=25-i)
+        })
+    return pd.DataFrame(sample_data)
 
-# Initialize database connection
-conn, c = init_database()
+# Initialize data if empty
+if st.session_state.customers_df.empty:
+    st.session_state.customers_df = load_sample_data()
+
+def add_customer(customer_data):
+    """Add new customer to session state"""
+    new_id = st.session_state.customers_df['id'].max() + 1 if not st.session_state.customers_df.empty else 1
+    customer_data['id'] = new_id
+    customer_data['created_at'] = datetime.now()
+    
+    # Convert to DataFrame and append
+    new_row = pd.DataFrame([customer_data])
+    st.session_state.customers_df = pd.concat([st.session_state.customers_df, new_row], ignore_index=True)
+
+def update_customer(customer_id, updates):
+    """Update customer record in session state"""
+    idx = st.session_state.customers_df[st.session_state.customers_df['id'] == customer_id].index
+    if not idx.empty:
+        for key, value in updates.items():
+            st.session_state.customers_df.at[idx[0], key] = value
 
 # Main header
 st.markdown('''
@@ -394,40 +237,29 @@ st.markdown('''
 <div class="last-updated">Last Updated: {} 00:01 (IST)</div>
 '''.format(datetime.now().strftime("%B %d, %Y")), unsafe_allow_html=True)
 
-# Floating Action Button
-if st.button("", key="fab", help="Add New Customer"):
-    st.session_state.show_add_form = not st.session_state.show_add_form
+# Add/Hide Customer Form Toggle
+col1, col2, col3 = st.columns([1, 1, 1])
+with col2:
+    if st.button("➕ Add New Customer" if not st.session_state.show_add_form else "❌ Hide Form", 
+                 use_container_width=True, type="primary"):
+        st.session_state.show_add_form = not st.session_state.show_add_form
 
-# Add FAB HTML and JavaScript
-fab_class = "fab open" if st.session_state.show_add_form else "fab"
-st.markdown(f'''
-<div class="{fab_class}" onclick="document.querySelector('[data-testid=\'fab\'] button').click()">
-    <div class="fab-icon">+</div>
-</div>
-''', unsafe_allow_html=True)
-
-# Modal Form
+# Show Add Customer Form
 if st.session_state.show_add_form:
-    st.markdown('''
-    <div class="modal-overlay" onclick="if(event.target === this) document.querySelector('[data-testid=\'fab\'] button').click()">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <button class="close-btn" onclick="document.querySelector('[data-testid=\'fab\'] button').click()">×</button>
-            <div class="modal-header">➕ Add New Service Record</div>
-        </div>
-    </div>
-    ''', unsafe_allow_html=True)
+    st.markdown('<div class="add-customer-section">', unsafe_allow_html=True)
+    st.markdown("### ➕ Add New Service Record")
     
-    # Create columns to center the form
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        with st.form("add_customer_modal", clear_on_submit=True):
-            st.markdown('<div class="modal-section"><h4>Customer Information</h4></div>', unsafe_allow_html=True)
+    with st.form("add_customer_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Customer Information**")
             name = st.text_input("Customer Name", placeholder="Enter customer name")
             phone = st.text_input("Phone", placeholder="+91 XXXXX XXXXX")
             address = st.text_area("Address", placeholder="Enter full address", height=80)
-            
-            st.markdown('<div class="modal-section"><h4>Service Details</h4></div>', unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("**Service Details**")
             service = st.selectbox("Service Type", [
                 "General Pest Control", 
                 "Termite Treatment", 
@@ -439,136 +271,68 @@ if st.session_state.show_add_form:
             ])
             visit_date = st.date_input("Visit Date", value=datetime.today())
             amount = st.number_input("Amount (₹)", min_value=0.0, step=100.0, format="%.2f")
-            
-            st.markdown('<div class="modal-section"><h4>Payment Information</h4></div>', unsafe_allow_html=True)
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            st.markdown("**Payment Information**")
             paid = st.checkbox("Payment Received")
             payment_method = st.selectbox("Payment Method", ["Cash", "UPI", "Bank Transfer", "Credit Card", "Pending"])
+        
+        with col4:
+            st.markdown("**Service Status**")
             service_status = st.selectbox("Service Status", ["Ongoing", "Completed", "Cancelled", "Scheduled"])
-            
-            # Form buttons
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
-            with col_btn2:
-                if st.form_submit_button("❌ Cancel", use_container_width=True):
-                    st.session_state.show_add_form = False
-                    st.rerun()
-
-            if submitted:
-                if name.strip():
-                    try:
-                        customer_data = {
-                            'name': name.strip(),
-                            'phone': phone.strip(),
-                            'address': address.strip(),
-                            'service': service,
-                            'visit_date': pd.to_datetime(visit_date),
-                            'amount': amount,
-                            'paid': 1 if paid else 0,
-                            'payment_method': payment_method,
-                            'service_status': service_status
-                        }
-                        add_customer(customer_data)
-                        st.success("✅ Record saved successfully!")
-                        st.session_state.show_add_form = False
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error saving record: {str(e)}")
-                else:
-                    st.error("❌ Please enter customer name")
-
-# Sidebar for adding new records
-with st.sidebar:
-    st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center; color: white; font-weight: 600;">➕ Add New Service Record</div>', unsafe_allow_html=True)
-
-    with st.form("add_form"):
-        st.markdown("**Customer Information**")
-        name = st.text_input("Customer Name", placeholder="Enter customer name")
-        phone = st.text_input("Phone", placeholder="+91 XXXXX XXXXX")
-        address = st.text_area("Address", placeholder="Enter full address")
         
-        st.markdown("**Service Details**")
-        service = st.selectbox("Service Type", [
-            "General Pest Control", 
-            "Termite Treatment", 
-            "Rodent Control", 
-            "Mosquito Control", 
-            "Cockroach Treatment",
-            "Ant Control",
-            "Other"
-        ])
-        visit_date = st.date_input("Visit Date", value=datetime.today())
-        amount = st.number_input("Amount (₹)", min_value=0.0, step=100.0, format="%.2f")
-        
-        st.markdown("**Payment Information**")
-        paid = st.checkbox("Payment Received")
-        payment_method = st.selectbox("Payment Method", ["Cash", "UPI", "Bank Transfer", "Credit Card", "Pending"])
-        service_status = st.selectbox("Service Status", ["Ongoing", "Completed", "Cancelled", "Scheduled"])
-        
-        submit = st.form_submit_button("💾 Save Record", use_container_width=True)
+        # Form buttons
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+        with col_btn2:
+            if st.form_submit_button("🔄 Reset Form", use_container_width=True):
+                st.rerun()
 
-        if submit:
+        if submitted:
             if name.strip():
                 try:
-                    c.execute('''
-                        INSERT INTO customers (name, phone, address, service, visit_date, amount, paid, payment_method, service_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        name.strip(), phone.strip(), address.strip(), service,
-                        visit_date.strftime("%Y-%m-%d"),
-                        amount, int(paid), payment_method, service_status
-                    ))
-                    conn.commit()
+                    customer_data = {
+                        'name': name.strip(),
+                        'phone': phone.strip(),
+                        'address': address.strip(),
+                        'service': service,
+                        'visit_date': pd.to_datetime(visit_date),
+                        'amount': amount,
+                        'paid': 1 if paid else 0,
+                        'payment_method': payment_method,
+                        'service_status': service_status
+                    }
+                    add_customer(customer_data)
                     st.success("✅ Record saved successfully!")
+                    st.balloons()  # Celebration effect
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error saving record: {str(e)}")
             else:
                 st.error("❌ Please enter customer name")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Load data
-def load_data():
-    try:
-        # First check if table exists and has data
-        c.execute("SELECT COUNT(*) FROM customers")
-        count = c.fetchone()[0]
-        
-        if count == 0:
-            # Return empty DataFrame with correct columns
-            return pd.DataFrame(columns=[
-                'id', 'name', 'phone', 'address', 'service', 'visit_date', 
-                'amount', 'paid', 'payment_method', 'service_status', 'created_at'
-            ])
-        
-        # Load data if table has records
-        df = pd.read_sql_query("SELECT * FROM customers ORDER BY id DESC", conn)
-        if not df.empty:
-            df["visit_date"] = pd.to_datetime(df["visit_date"], errors='coerce')
-            df["month"] = df["visit_date"].dt.month
-            df["year"] = df["visit_date"].dt.year
-            df["day_name"] = df["visit_date"].dt.day_name()
-        return df
-    except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
-            st.error("Database table not found. Please restart the application.")
-            st.stop()
-        else:
-            st.error(f"Database error: {str(e)}")
-            return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return pd.DataFrame()
+df = st.session_state.customers_df.copy()
 
-df = load_data()
+# Ensure visit_date is datetime
+if not df.empty:
+    df["visit_date"] = pd.to_datetime(df["visit_date"], errors='coerce')
+    df["month"] = df["visit_date"].dt.month
+    df["year"] = df["visit_date"].dt.year
+    df["day_name"] = df["visit_date"].dt.day_name()
 
 if df.empty:
     st.markdown("""
     <div style='text-align: center; padding: 3rem; color: rgba(255,255,255,0.8);'>
-        <h2>📊 No data available yet</h2>
-        <p>Add your first customer record using the sidebar to get started!</p>
+        <h2>📊 Welcome to BharatPest Control Dashboard</h2>
+        <p>Click "Add New Customer" above to get started!</p>
+        <p><em>Currently showing sample data for demonstration</em></p>
     </div>
     """, unsafe_allow_html=True)
-    st.stop()
 
 # Calculate metrics
 total_contracts = len(df)
@@ -584,6 +348,8 @@ daily_change_pending = -800
 daily_change_completed = 8
 
 # Key Performance Indicators
+st.markdown('<div class="section-header">📊 Business Overview</div>', unsafe_allow_html=True)
+
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -622,21 +388,9 @@ with col4:
     </div>
     """, unsafe_allow_html=True)
 
-# Location selector (similar to COVID dashboard)
-st.markdown('<div class="section-header">Select Location:</div>', unsafe_allow_html=True)
-
-col1, col2 = st.columns([1, 3])
-with col1:
-    locations = ['All Locations'] + list(df['address'].str.split(',').str[-1].str.strip().unique())
-    selected_location = st.selectbox("", locations, key="location_filter")
-
-# Filter data by location if not "All Locations"
-if selected_location != 'All Locations':
-    df_filtered = df[df['address'].str.contains(selected_location, case=False, na=False)]
-else:
-    df_filtered = df.copy()
-
 # Charts section
+st.markdown('<div class="section-header">📈 Performance Analytics</div>', unsafe_allow_html=True)
+
 col1, col2 = st.columns(2)
 
 with col1:
@@ -644,7 +398,7 @@ with col1:
     st.markdown('<div class="chart-title">Service Distribution</div>', unsafe_allow_html=True)
     
     # Service distribution donut chart
-    service_counts = df_filtered['service'].value_counts()
+    service_counts = df['service'].value_counts()
     
     fig_donut = go.Figure(data=[go.Pie(
         labels=service_counts.index,
@@ -660,7 +414,7 @@ with col1:
     
     # Add center text
     fig_donut.add_annotation(
-        text=f"<b>Active</b><br>{len(df_filtered[df_filtered['service_status'] != 'Cancelled']):,}",
+        text=f"<b>Active</b><br>{len(df[df['service_status'] != 'Cancelled']):,}",
         x=0.5, y=0.5,
         font_size=16,
         font_color='white',
@@ -692,7 +446,7 @@ with col2:
     
     # Last 30 days performance chart
     thirty_days_ago = datetime.now() - timedelta(days=30)
-    recent_data = df_filtered[df_filtered['visit_date'] >= thirty_days_ago]
+    recent_data = df[df['visit_date'] >= thirty_days_ago]
     
     if not recent_data.empty:
         daily_stats = recent_data.groupby(recent_data['visit_date'].dt.date).agg({
@@ -720,7 +474,7 @@ with col2:
             x=daily_stats['Date'],
             y=daily_stats['Rolling_Avg'],
             mode='lines',
-            name='Rolling average of the last seven days',
+            name='Rolling average (7 days)',
             line=dict(color='#f06292', width=3),
             yaxis='y'
         ))
@@ -769,59 +523,11 @@ with col2:
     st.plotly_chart(fig_trend, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# New section for today's summary
-st.markdown('<div class="section-header">New Records : {}</div>'.format(datetime.now().strftime("%B %d, %Y")), unsafe_allow_html=True)
-
-today = datetime.now().date()
-today_data = df[df['visit_date'].dt.date == today]
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    new_confirmed = len(today_data)
-    st.markdown(f"""
-    <div style="background: rgba(255, 183, 77, 0.2); padding: 1rem; border-radius: 10px; text-align: center;">
-        <div style="color: #ffb74d; font-size: 1.8rem; font-weight: 700;">{new_confirmed}</div>
-        <div style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">▲ 4,432</div>
-        <div style="color: white; font-size: 0.85rem; margin-top: 0.5rem;">New Confirmed</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    new_revenue = today_data['amount'].sum() if not today_data.empty else 0
-    st.markdown(f"""
-    <div style="background: rgba(129, 199, 132, 0.2); padding: 1rem; border-radius: 10px; text-align: center;">
-        <div style="color: #81c784; font-size: 1.8rem; font-weight: 700;">₹{new_revenue:,.0f}</div>
-        <div style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">▼ -4</div>
-        <div style="color: white; font-size: 0.85rem; margin-top: 0.5rem;">New Revenue</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    new_completed = len(today_data[today_data['service_status'] == 'Completed'])
-    st.markdown(f"""
-    <div style="background: rgba(100, 181, 246, 0.2); padding: 1rem; border-radius: 10px; text-align: center;">
-        <div style="color: #64b5f6; font-size: 1.8rem; font-weight: 700;">{new_completed}</div>
-        <div style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">▼ -17</div>
-        <div style="color: white; font-size: 0.85rem; margin-top: 0.5rem;">New Completed</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col4:
-    new_active = len(today_data[today_data['service_status'] == 'Ongoing'])
-    st.markdown(f"""
-    <div style="background: rgba(240, 98, 146, 0.2); padding: 1rem; border-radius: 10px; text-align: center;">
-        <div style="color: #f06292; font-size: 1.8rem; font-weight: 700;">{new_active}</div>
-        <div style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">▲ 4,453</div>
-        <div style="color: white; font-size: 0.85rem; margin-top: 0.5rem;">New Active</div>
-    </div>
-    """, unsafe_allow_html=True)
-
 # Customer Records Management
 st.markdown('<div class="section-header">📋 Customer Records Management</div>', unsafe_allow_html=True)
 
 # Filters
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     status_filter = st.selectbox("Filter by Status", ["All"] + list(df['service_status'].unique()))
@@ -831,6 +537,18 @@ with col2:
 
 with col3:
     service_filter = st.selectbox("Filter by Service", ["All"] + list(df['service'].unique()))
+
+with col4:
+    # Export functionality
+    if st.button("📊 Export Data", use_container_width=True):
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="💾 Download CSV",
+            data=csv,
+            file_name=f'pest_control_data_{datetime.now().strftime("%Y%m%d")}.csv',
+            mime='text/csv',
+            use_container_width=True
+        )
 
 # Apply filters
 filtered_records = df.copy()
@@ -891,14 +609,13 @@ if not filtered_records.empty:
                     key=f"payment_{row['id']}"
                 )
                 
-                if st.button("Update", key=f"update_{row['id']}", use_container_width=True):
+                if st.button("🔄 Update", key=f"update_{row['id']}", use_container_width=True):
                     try:
-                        c.execute("""
-                            UPDATE customers 
-                            SET service_status = ?, paid = ?
-                            WHERE id = ?
-                        """, (new_status, int(new_payment), row['id']))
-                        conn.commit()
+                        updates = {
+                            'service_status': new_status,
+                            'paid': 1 if new_payment else 0
+                        }
+                        update_customer(row['id'], updates)
                         st.success(f"✅ Updated {row['name']}'s record")
                         st.rerun()
                     except Exception as e:
@@ -909,10 +626,37 @@ if not filtered_records.empty:
 else:
     st.markdown("<div style='color: rgba(255,255,255,0.6); text-align: center; margin: 2rem 0;'>📊 No records match the selected filters.</div>", unsafe_allow_html=True)
 
+# Sidebar with quick actions
+with st.sidebar:
+    st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center; color: white; font-weight: 600;">📊 Quick Stats</div>', unsafe_allow_html=True)
+    
+    # Quick stats in sidebar
+    if not df.empty:
+        pending_payments = df[df['paid'] == 0]['amount'].sum()
+        recent_customers = len(df[df['visit_date'] >= (datetime.now() - timedelta(days=7))])
+        
+        st.metric("💰 Pending Payments", f"₹{pending_payments:,.0f}")
+        st.metric("📅 This Week's Customers", f"{recent_customers}")
+        st.metric("🎯 Completion Rate", f"{(completed_count/total_contracts*100):.1f}%" if total_contracts > 0 else "0%")
+    
+    st.markdown("---")
+    
+    # Unpaid customers quick view
+    st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center; color: white; font-weight: 600;">🔍 Unpaid Customers</div>', unsafe_allow_html=True)
+    
+    unpaid_customers = df[df['paid'] == 0]
+    if not unpaid_customers.empty:
+        st.write("**Top 5 Pending:**")
+        for _, customer in unpaid_customers.nlargest(5, 'amount').iterrows():
+            st.write(f"📞 {customer['name']}: ₹{customer['amount']:,.0f}")
+    else:
+        st.success("🎉 No pending payments!")
+
 # Footer
 st.markdown("""
 <div style='text-align: center; color: rgba(255,255,255,0.6); padding: 2rem; margin-top: 3rem; border-top: 1px solid rgba(255,255,255,0.2);'>
     <p>🐛 <strong>BharatPest Control Dashboard</strong> • Professional Business Management</p>
     <p>Track • Analyze • Optimize your pest control operations</p>
+    <p><em>Data persists during your session • Add your records to see live updates</em></p>
 </div>
 """, unsafe_allow_html=True)
