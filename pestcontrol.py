@@ -179,6 +179,177 @@ st.markdown("""
         background: rgba(244, 67, 54, 0.2);
         border-left: 4px solid #f44336;
     }
+    
+    /* Floating Action Button */
+    .fab {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        width: 70px;
+        height: 70px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        z-index: 1000;
+        border: 3px solid rgba(255,255,255,0.2);
+    }
+    
+    .fab:hover {
+        transform: scale(1.1);
+        box-shadow: 0 12px 35px rgba(0,0,0,0.4);
+    }
+    
+    .fab-icon {
+        color: white;
+        font-size: 2rem;
+        font-weight: bold;
+        transition: transform 0.3s ease;
+    }
+    
+    .fab.open .fab-icon {
+        transform: rotate(45deg);
+    }
+    
+    /* Modal Overlay */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(5px);
+        z-index: 999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    /* Modal Content */
+    .modal-content {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        padding: 2rem;
+        width: 90%;
+        max-width: 500px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        animation: slideUp 0.3s ease;
+    }
+    
+    @keyframes slideUp {
+        from { 
+            opacity: 0;
+            transform: translateY(50px);
+        }
+        to { 
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .modal-header {
+        color: white;
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+        text-align: center;
+        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+        padding-bottom: 1rem;
+    }
+    
+    .modal-section {
+        margin: 1.5rem 0;
+    }
+    
+    .modal-section h4 {
+        color: #ffa726;
+        font-size: 1.1rem;
+        font-weight: 500;
+        margin-bottom: 0.8rem;
+        border-left: 3px solid #ffa726;
+        padding-left: 0.8rem;
+    }
+    
+    /* Close button */
+    .close-btn {
+        position: absolute;
+        top: 15px;
+        right: 20px;
+        background: none;
+        border: none;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 1.5rem;
+        cursor: pointer;
+        transition: color 0.3s ease;
+    }
+    
+    .close-btn:hover {
+        color: white;
+        transform: scale(1.1);
+    }
+    
+""", unsafe_allow_html=True)
+
+# Add JavaScript for FAB functionality
+st.markdown("""
+<script>
+// Make FAB clickable
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle FAB clicks
+    const fabElements = document.querySelectorAll('.fab');
+    fabElements.forEach(fab => {
+        fab.addEventListener('click', function() {
+            // Find and click the hidden Streamlit button
+            const button = document.querySelector('[data-testid="fab"] button');
+            if (button) button.click();
+        });
+    });
+    
+    // Handle modal overlay clicks
+    const modalOverlay = document.querySelector('.modal-overlay');
+    if (modalOverlay) {
+        modalOverlay.addEventListener('click', function(e) {
+            if (e.target === modalOverlay) {
+                const button = document.querySelector('[data-testid="fab"] button');
+                if (button) button.click();
+            }
+        });
+    }
+    
+    // Handle close button clicks
+    const closeBtn = document.querySelector('.close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+            const button = document.querySelector('[data-testid="fab"] button');
+            if (button) button.click();
+        });
+    }
+    
+    // Handle ESC key press
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const button = document.querySelector('[data-testid="fab"] button');
+            if (button && document.querySelector('.modal-overlay')) {
+                button.click();
+            }
+        }
+    });
+});
+</script>
 </style>
 """, unsafe_allow_html=True)
 
@@ -222,6 +393,89 @@ st.markdown('''
 <div class="sub-header">Business Performance Dashboard</div>
 <div class="last-updated">Last Updated: {} 00:01 (IST)</div>
 '''.format(datetime.now().strftime("%B %d, %Y")), unsafe_allow_html=True)
+
+# Floating Action Button
+if st.button("", key="fab", help="Add New Customer"):
+    st.session_state.show_add_form = not st.session_state.show_add_form
+
+# Add FAB HTML and JavaScript
+fab_class = "fab open" if st.session_state.show_add_form else "fab"
+st.markdown(f'''
+<div class="{fab_class}" onclick="document.querySelector('[data-testid=\'fab\'] button').click()">
+    <div class="fab-icon">+</div>
+</div>
+''', unsafe_allow_html=True)
+
+# Modal Form
+if st.session_state.show_add_form:
+    st.markdown('''
+    <div class="modal-overlay" onclick="if(event.target === this) document.querySelector('[data-testid=\'fab\'] button').click()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <button class="close-btn" onclick="document.querySelector('[data-testid=\'fab\'] button').click()">×</button>
+            <div class="modal-header">➕ Add New Service Record</div>
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+    
+    # Create columns to center the form
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        with st.form("add_customer_modal", clear_on_submit=True):
+            st.markdown('<div class="modal-section"><h4>Customer Information</h4></div>', unsafe_allow_html=True)
+            name = st.text_input("Customer Name", placeholder="Enter customer name")
+            phone = st.text_input("Phone", placeholder="+91 XXXXX XXXXX")
+            address = st.text_area("Address", placeholder="Enter full address", height=80)
+            
+            st.markdown('<div class="modal-section"><h4>Service Details</h4></div>', unsafe_allow_html=True)
+            service = st.selectbox("Service Type", [
+                "General Pest Control", 
+                "Termite Treatment", 
+                "Rodent Control", 
+                "Mosquito Control", 
+                "Cockroach Treatment",
+                "Ant Control",
+                "Other"
+            ])
+            visit_date = st.date_input("Visit Date", value=datetime.today())
+            amount = st.number_input("Amount (₹)", min_value=0.0, step=100.0, format="%.2f")
+            
+            st.markdown('<div class="modal-section"><h4>Payment Information</h4></div>', unsafe_allow_html=True)
+            paid = st.checkbox("Payment Received")
+            payment_method = st.selectbox("Payment Method", ["Cash", "UPI", "Bank Transfer", "Credit Card", "Pending"])
+            service_status = st.selectbox("Service Status", ["Ongoing", "Completed", "Cancelled", "Scheduled"])
+            
+            # Form buttons
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+            with col_btn2:
+                if st.form_submit_button("❌ Cancel", use_container_width=True):
+                    st.session_state.show_add_form = False
+                    st.rerun()
+
+            if submitted:
+                if name.strip():
+                    try:
+                        customer_data = {
+                            'name': name.strip(),
+                            'phone': phone.strip(),
+                            'address': address.strip(),
+                            'service': service,
+                            'visit_date': pd.to_datetime(visit_date),
+                            'amount': amount,
+                            'paid': 1 if paid else 0,
+                            'payment_method': payment_method,
+                            'service_status': service_status
+                        }
+                        add_customer(customer_data)
+                        st.success("✅ Record saved successfully!")
+                        st.session_state.show_add_form = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error saving record: {str(e)}")
+                else:
+                    st.error("❌ Please enter customer name")
 
 # Sidebar for adding new records
 with st.sidebar:
@@ -321,8 +575,7 @@ total_contracts = len(df)
 total_revenue = df['amount'].sum()
 total_paid = df.loc[df['paid'] == 1, 'amount'].sum()
 total_pending = df.loc[df['paid'] == 0, 'amount'].sum()
-# Handle both "Completed" and "Finished" status
-completed_count = len(df[(df['service_status'] == 'Completed') | (df['service_status'] == 'Finished')])
+completed_count = len(df[df['service_status'] == 'Completed'])
 
 # Calculate daily changes (mock data for demo)
 daily_change_contracts = 15
@@ -545,7 +798,7 @@ with col2:
     """, unsafe_allow_html=True)
 
 with col3:
-    new_completed = len(today_data[(today_data['service_status'] == 'Completed') | (today_data['service_status'] == 'Finished')])
+    new_completed = len(today_data[today_data['service_status'] == 'Completed'])
     st.markdown(f"""
     <div style="background: rgba(100, 181, 246, 0.2); padding: 1rem; border-radius: 10px; text-align: center;">
         <div style="color: #64b5f6; font-size: 1.8rem; font-weight: 700;">{new_completed}</div>
@@ -615,25 +868,14 @@ if not filtered_records.empty:
                 """)
             
             with col2:
-                # Status update - handle both old and new status values
+                # Status update
                 status_options = ["Ongoing", "Completed", "Cancelled", "Scheduled"]
-                
-                # Map old status values to new ones
-                status_mapping = {
-                    "Finished": "Completed",
-                    "Ongoing": "Ongoing", 
-                    "Completed": "Completed",
-                    "Cancelled": "Cancelled",
-                    "Scheduled": "Scheduled"
-                }
-                
-                current_status = status_mapping.get(row['service_status'], row['service_status'])
                 
                 # Find the index, default to 0 if not found
                 try:
-                    status_index = status_options.index(current_status)
+                    status_index = status_options.index(row['service_status'])
                 except ValueError:
-                    status_index = 0
+                    status_index = 0  # Default to "Ongoing" if status not found
                 
                 new_status = st.selectbox(
                     "Update Status",
