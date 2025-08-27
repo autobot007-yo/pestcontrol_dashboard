@@ -1,15 +1,18 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import shutil
+import os
 
-# Initialize session state FIRST (before anything else)
-if 'customers_df' not in st.session_state:
-    st.session_state.customers_df = pd.DataFrame()
-
+# Initialize session state FIRST
 if 'show_add_form' not in st.session_state:
     st.session_state.show_add_form = False
+
+if 'db_initialized' not in st.session_state:
+    st.session_state.db_initialized = False
 
 # Page configuration
 st.set_page_config(
@@ -19,7 +22,54 @@ st.set_page_config(
     page_icon="🐛"
 )
 
-# Custom CSS for COVID-19 dashboard style
+# Database setup with demo data preservation
+@st.cache_resource
+def init_database_with_demo_data():
+    """Initialize database, preserving demo data from repo"""
+    
+    # Check if we need to restore demo data
+    demo_db_path = 'pestcontrol_demo.db'  # Your original DB renamed
+    active_db_path = 'pestcontrol.db'
+    
+    # If active DB doesn't exist and demo DB does, copy it
+    if not os.path.exists(active_db_path) and os.path.exists(demo_db_path):
+        shutil.copy2(demo_db_path, active_db_path)
+        st.toast("📊 Demo database loaded successfully!", icon="✅")
+    
+    # Connect to database
+    conn = sqlite3.connect(active_db_path, check_same_thread=False)
+    c = conn.cursor()
+    
+    # Create table if it doesn't exist
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT,
+            address TEXT,
+            service TEXT,
+            visit_date TEXT,
+            amount REAL,
+            paid INTEGER DEFAULT 0,
+            payment_method TEXT,
+            service_status TEXT DEFAULT 'Ongoing',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Update old status values for compatibility
+    try:
+        c.execute("UPDATE customers SET service_status = 'Completed' WHERE service_status = 'Finished'")
+        conn.commit()
+    except:
+        pass
+    
+    return conn, c
+
+# Initialize database
+conn, c = init_database_with_demo_data()
+
+# Custom CSS (same as before)
 st.markdown("""
 <style>
     /* Global dark theme */
@@ -54,7 +104,18 @@ st.markdown("""
         color: #ffa726;
         font-size: 1.2rem;
         font-weight: 400;
+        margin-bottom: 1rem;
+    }
+    
+    .demo-info {
+        text-align: center;
+        background: rgba(76, 175, 80, 0.2);
+        color: #81c784;
+        padding: 0.8rem;
+        border-radius: 10px;
+        font-size: 0.9rem;
         margin-bottom: 2rem;
+        border: 1px solid rgba(129, 199, 132, 0.3);
     }
     
     .last-updated {
@@ -185,55 +246,36 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Sample data function
+# Load data function
 @st.cache_data
-def load_sample_data():
-    """Load sample data for demonstration"""
-    sample_data = []
-    services = ["General Pest Control", "Termite Treatment", "Rodent Control", "Mosquito Control", "Cockroach Treatment"]
-    addresses = ["Andheri, Mumbai", "Bandra, Mumbai", "Thane", "Pune", "Nashik", "Aurangabad"]
-    
-    for i in range(1, 26):  # 25 sample records
-        sample_data.append({
-            'id': i,
-            'name': f'Customer {i}',
-            'phone': f'+91 98765 {43210 + i}',
-            'address': f'Plot {i}, {addresses[i % len(addresses)]}',
-            'service': services[i % len(services)],
-            'visit_date': datetime.now() - timedelta(days=25-i),
-            'amount': 500 + (i * 200),
-            'paid': 1 if i % 3 != 0 else 0,
-            'payment_method': 'UPI' if i % 2 == 0 else 'Cash',
-            'service_status': 'Completed' if i % 4 == 0 else 'Ongoing',
-            'created_at': datetime.now() - timedelta(days=25-i)
-        })
-    return pd.DataFrame(sample_data)
-
-# Initialize data if empty
-if st.session_state.customers_df.empty:
-    st.session_state.customers_df = load_sample_data()
-
-def add_customer(customer_data):
-    """Add new customer to session state"""
-    new_id = st.session_state.customers_df['id'].max() + 1 if not st.session_state.customers_df.empty else 1
-    customer_data['id'] = new_id
-    customer_data['created_at'] = datetime.now()
-    
-    # Convert to DataFrame and append
-    new_row = pd.DataFrame([customer_data])
-    st.session_state.customers_df = pd.concat([st.session_state.customers_df, new_row], ignore_index=True)
-
-def update_customer(customer_id, updates):
-    """Update customer record in session state"""
-    idx = st.session_state.customers_df[st.session_state.customers_df['id'] == customer_id].index
-    if not idx.empty:
-        for key, value in updates.items():
-            st.session_state.customers_df.at[idx[0], key] = value
+def load_data():
+    """Load data from SQLite database"""
+    try:
+        df = pd.read_sql_query("SELECT * FROM customers ORDER BY id DESC", conn)
+        if not df.empty:
+            df["visit_date"] = pd.to_datetime(df["visit_date"], errors='coerce')
+            df["month"] = df["visit_date"].dt.month
+            df["year"] = df["visit_date"].dt.year
+            df["day_name"] = df["visit_date"].dt.day_name()
+        return df
+    except Exception as e:
+        st.error(f"Database error: {str(e)}")
+        return pd.DataFrame()
 
 # Main header
 st.markdown('''
 <div class="main-header">BharatPest Control</div>
 <div class="sub-header">Business Performance Dashboard</div>
+''', unsafe_allow_html=True)
+
+# Demo info banner
+st.markdown('''
+<div class="demo-info">
+    🎯 <strong>Live Demo Dashboard</strong> • Real business data included • Add new customers to test functionality
+</div>
+''', unsafe_allow_html=True)
+
+st.markdown('''
 <div class="last-updated">Last Updated: {} 00:01 (IST)</div>
 '''.format(datetime.now().strftime("%B %d, %Y")), unsafe_allow_html=True)
 
@@ -293,20 +335,18 @@ if st.session_state.show_add_form:
         if submitted:
             if name.strip():
                 try:
-                    customer_data = {
-                        'name': name.strip(),
-                        'phone': phone.strip(),
-                        'address': address.strip(),
-                        'service': service,
-                        'visit_date': pd.to_datetime(visit_date),
-                        'amount': amount,
-                        'paid': 1 if paid else 0,
-                        'payment_method': payment_method,
-                        'service_status': service_status
-                    }
-                    add_customer(customer_data)
+                    c.execute('''
+                        INSERT INTO customers (name, phone, address, service, visit_date, amount, paid, payment_method, service_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        name.strip(), phone.strip(), address.strip(), service,
+                        visit_date.strftime("%Y-%m-%d"),
+                        amount, int(paid), payment_method, service_status
+                    ))
+                    conn.commit()
                     st.success("✅ Record saved successfully!")
-                    st.balloons()  # Celebration effect
+                    st.balloons()
+                    load_data.clear()  # Clear cache to refresh data
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error saving record: {str(e)}")
@@ -315,24 +355,21 @@ if st.session_state.show_add_form:
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Load data
-df = st.session_state.customers_df.copy()
+# Load and display data
+df = load_data()
 
-# Ensure visit_date is datetime
-if not df.empty:
-    df["visit_date"] = pd.to_datetime(df["visit_date"], errors='coerce')
-    df["month"] = df["visit_date"].dt.month
-    df["year"] = df["visit_date"].dt.year
-    df["day_name"] = df["visit_date"].dt.day_name()
+# Rest of your dashboard code (KPIs, charts, customer records, etc.)
+# [Include all the existing dashboard code from the previous version]
 
 if df.empty:
     st.markdown("""
     <div style='text-align: center; padding: 3rem; color: rgba(255,255,255,0.8);'>
         <h2>📊 Welcome to BharatPest Control Dashboard</h2>
         <p>Click "Add New Customer" above to get started!</p>
-        <p><em>Currently showing sample data for demonstration</em></p>
+        <p><em>Database is ready - your data will be saved during this session</em></p>
     </div>
     """, unsafe_allow_html=True)
+    st.stop()
 
 # Calculate metrics
 total_contracts = len(df)
@@ -340,12 +377,6 @@ total_revenue = df['amount'].sum()
 total_paid = df.loc[df['paid'] == 1, 'amount'].sum()
 total_pending = df.loc[df['paid'] == 0, 'amount'].sum()
 completed_count = len(df[df['service_status'] == 'Completed'])
-
-# Calculate daily changes (mock data for demo)
-daily_change_contracts = 15
-daily_change_revenue = 2500
-daily_change_pending = -800
-daily_change_completed = 8
 
 # Key Performance Indicators
 st.markdown('<div class="section-header">📊 Business Overview</div>', unsafe_allow_html=True)
@@ -357,7 +388,7 @@ with col1:
     <div class="metric-card">
         <div class="metric-title">Total Contracts</div>
         <div class="metric-value metric-total">{total_contracts:,}</div>
-        <div class="metric-change">new: +{daily_change_contracts} (+2.1%)</div>
+        <div class="metric-change">Active business records</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -366,7 +397,7 @@ with col2:
     <div class="metric-card">
         <div class="metric-title">Total Revenue</div>
         <div class="metric-value metric-revenue">₹{total_revenue:,.0f}</div>
-        <div class="metric-change">new: +₹{daily_change_revenue:,} (+1.8%)</div>
+        <div class="metric-change">Lifetime earnings</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -375,7 +406,7 @@ with col3:
     <div class="metric-card">
         <div class="metric-title">Pending Payments</div>
         <div class="metric-value metric-pending">₹{total_pending:,.0f}</div>
-        <div class="metric-change">new: ₹{daily_change_pending:,} (-2.3%)</div>
+        <div class="metric-change">Outstanding amount</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -384,7 +415,7 @@ with col4:
     <div class="metric-card">
         <div class="metric-title">Completed Jobs</div>
         <div class="metric-value metric-completed">{completed_count:,}</div>
-        <div class="metric-change">new: +{daily_change_completed} (+3.2%)</div>
+        <div class="metric-change">Successful services</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -397,7 +428,6 @@ with col1:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
     st.markdown('<div class="chart-title">Service Distribution</div>', unsafe_allow_html=True)
     
-    # Service distribution donut chart
     service_counts = df['service'].value_counts()
     
     fig_donut = go.Figure(data=[go.Pie(
@@ -412,9 +442,8 @@ with col1:
         hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
     )])
     
-    # Add center text
     fig_donut.add_annotation(
-        text=f"<b>Active</b><br>{len(df[df['service_status'] != 'Cancelled']):,}",
+        text=f"<b>Total</b><br>{len(df):,}",
         x=0.5, y=0.5,
         font_size=16,
         font_color='white',
@@ -423,14 +452,7 @@ with col1:
     
     fig_donut.update_layout(
         showlegend=True,
-        legend=dict(
-            orientation="v",
-            yanchor="middle",
-            y=0.5,
-            xanchor="left",
-            x=1.05,
-            font=dict(color='white', size=10)
-        ),
+        legend=dict(font=dict(color='white', size=10)),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         height=350,
@@ -442,133 +464,40 @@ with col1:
 
 with col2:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    st.markdown('<div class="chart-title">Last 30 Days Performance</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-title">Payment Status Overview</div>', unsafe_allow_html=True)
     
-    # Last 30 days performance chart
-    thirty_days_ago = datetime.now() - timedelta(days=30)
-    recent_data = df[df['visit_date'] >= thirty_days_ago]
+    payment_counts = df['paid'].value_counts()
+    payment_labels = ['Paid' if x == 1 else 'Unpaid' for x in payment_counts.index]
     
-    if not recent_data.empty:
-        daily_stats = recent_data.groupby(recent_data['visit_date'].dt.date).agg({
-            'id': 'count',
-            'amount': 'sum'
-        }).reset_index()
-        daily_stats.columns = ['Date', 'Contracts', 'Revenue']
-        
-        # Calculate rolling average
-        daily_stats['Rolling_Avg'] = daily_stats['Contracts'].rolling(window=7, min_periods=1).mean()
-        
-        fig_trend = go.Figure()
-        
-        # Add bar chart for daily contracts
-        fig_trend.add_trace(go.Bar(
-            x=daily_stats['Date'],
-            y=daily_stats['Contracts'],
-            name='Daily Confirmed',
-            marker_color='#ffb74d',
-            opacity=0.8
-        ))
-        
-        # Add rolling average line
-        fig_trend.add_trace(go.Scatter(
-            x=daily_stats['Date'],
-            y=daily_stats['Rolling_Avg'],
-            mode='lines',
-            name='Rolling average (7 days)',
-            line=dict(color='#f06292', width=3),
-            yaxis='y'
-        ))
-        
-        fig_trend.update_layout(
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-0.1,
-                xanchor="center",
-                x=0.5,
-                font=dict(color='white', size=10)
-            ),
-            xaxis=dict(
-                title='Date',
-                color='white',
-                gridcolor='rgba(255,255,255,0.1)'
-            ),
-            yaxis=dict(
-                title='Number of Contracts',
-                color='white',
-                gridcolor='rgba(255,255,255,0.1)'
-            ),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            height=350,
-            margin=dict(l=20, r=20, t=20, b=60)
-        )
-    else:
-        # Empty chart placeholder
-        fig_trend = go.Figure()
-        fig_trend.add_annotation(
-            text="No data for the last 30 days",
-            x=0.5, y=0.5,
-            xref="paper", yref="paper",
-            font_size=16, font_color='white',
-            showarrow=False
-        )
-        fig_trend.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            height=350
-        )
+    fig_payment = go.Figure(data=[go.Bar(
+        x=payment_labels,
+        y=payment_counts.values,
+        marker_color=['#81c784', '#f06292'],
+        text=payment_counts.values,
+        textposition='auto',
+        textfont=dict(color='white', size=14, family="Arial Black")
+    )])
     
-    st.plotly_chart(fig_trend, use_container_width=True)
+    fig_payment.update_layout(
+        xaxis=dict(title='Payment Status', color='white'),
+        yaxis=dict(title='Number of Customers', color='white'),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        height=350,
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig_payment, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Customer Records Management
-st.markdown('<div class="section-header">📋 Customer Records Management</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">📋 Recent Customer Records</div>', unsafe_allow_html=True)
 
-# Filters
-col1, col2, col3, col4 = st.columns(4)
+# Show top 10 most recent records
+recent_records = df.head(10)
 
-with col1:
-    status_filter = st.selectbox("Filter by Status", ["All"] + list(df['service_status'].unique()))
-
-with col2:
-    payment_filter = st.selectbox("Filter by Payment", ["All", "Paid", "Unpaid"])
-
-with col3:
-    service_filter = st.selectbox("Filter by Service", ["All"] + list(df['service'].unique()))
-
-with col4:
-    # Export functionality
-    if st.button("📊 Export Data", use_container_width=True):
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="💾 Download CSV",
-            data=csv,
-            file_name=f'pest_control_data_{datetime.now().strftime("%Y%m%d")}.csv',
-            mime='text/csv',
-            use_container_width=True
-        )
-
-# Apply filters
-filtered_records = df.copy()
-
-if status_filter != "All":
-    filtered_records = filtered_records[filtered_records['service_status'] == status_filter]
-
-if payment_filter == "Paid":
-    filtered_records = filtered_records[filtered_records['paid'] == 1]
-elif payment_filter == "Unpaid":
-    filtered_records = filtered_records[filtered_records['paid'] == 0]
-
-if service_filter != "All":
-    filtered_records = filtered_records[filtered_records['service'] == service_filter]
-
-# Display filtered records
-if not filtered_records.empty:
-    st.markdown(f"<div style='color: rgba(255,255,255,0.8); margin: 1rem 0;'>Showing {len(filtered_records)} of {len(df)} records</div>", unsafe_allow_html=True)
-    
-    for idx, row in filtered_records.head(10).iterrows():  # Limit to 10 for performance
+if not recent_records.empty:
+    for idx, row in recent_records.iterrows():
         with st.expander(f"🏠 {row['name']} • {row['phone']} • ₹{row['amount']:,.0f} • {row['service_status']}"):
             col1, col2 = st.columns([3, 1])
             
@@ -586,51 +515,12 @@ if not filtered_records.empty:
                 """)
             
             with col2:
-                # Status update
-                status_options = ["Ongoing", "Completed", "Cancelled", "Scheduled"]
-                
-                # Find the index, default to 0 if not found
-                try:
-                    status_index = status_options.index(row['service_status'])
-                except ValueError:
-                    status_index = 0  # Default to "Ongoing" if status not found
-                
-                new_status = st.selectbox(
-                    "Update Status",
-                    status_options,
-                    index=status_index,
-                    key=f"status_{row['id']}"
-                )
-                
-                # Payment update
-                new_payment = st.checkbox(
-                    "Mark as Paid",
-                    value=bool(row['paid']),
-                    key=f"payment_{row['id']}"
-                )
-                
-                if st.button("🔄 Update", key=f"update_{row['id']}", use_container_width=True):
-                    try:
-                        updates = {
-                            'service_status': new_status,
-                            'paid': 1 if new_payment else 0
-                        }
-                        update_customer(row['id'], updates)
-                        st.success(f"✅ Updated {row['name']}'s record")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error updating record: {str(e)}")
-    
-    if len(filtered_records) > 10:
-        st.markdown(f"<div style='color: rgba(255,255,255,0.6); text-align: center; margin: 2rem 0;'>Showing first 10 records. Total: {len(filtered_records)} records match your filters.</div>", unsafe_allow_html=True)
-else:
-    st.markdown("<div style='color: rgba(255,255,255,0.6); text-align: center; margin: 2rem 0;'>📊 No records match the selected filters.</div>", unsafe_allow_html=True)
+                st.info("👁️ **Demo Mode**\n\nRecord updates available in full version")
 
-# Sidebar with quick actions
+# Sidebar with stats
 with st.sidebar:
     st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center; color: white; font-weight: 600;">📊 Quick Stats</div>', unsafe_allow_html=True)
     
-    # Quick stats in sidebar
     if not df.empty:
         pending_payments = df[df['paid'] == 0]['amount'].sum()
         recent_customers = len(df[df['visit_date'] >= (datetime.now() - timedelta(days=7))])
@@ -638,25 +528,23 @@ with st.sidebar:
         st.metric("💰 Pending Payments", f"₹{pending_payments:,.0f}")
         st.metric("📅 This Week's Customers", f"{recent_customers}")
         st.metric("🎯 Completion Rate", f"{(completed_count/total_contracts*100):.1f}%" if total_contracts > 0 else "0%")
-    
-    st.markdown("---")
-    
-    # Unpaid customers quick view
-    st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center; color: white; font-weight: 600;">🔍 Unpaid Customers</div>', unsafe_allow_html=True)
-    
-    unpaid_customers = df[df['paid'] == 0]
-    if not unpaid_customers.empty:
-        st.write("**Top 5 Pending:**")
-        for _, customer in unpaid_customers.nlargest(5, 'amount').iterrows():
-            st.write(f"📞 {customer['name']}: ₹{customer['amount']:,.0f}")
-    else:
-        st.success("🎉 No pending payments!")
+        
+        # Export functionality
+        if st.button("📊 Export Database", use_container_width=True):
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="💾 Download CSV",
+                data=csv,
+                file_name=f'pest_control_backup_{datetime.now().strftime("%Y%m%d")}.csv',
+                mime='text/csv',
+                use_container_width=True
+            )
 
 # Footer
 st.markdown("""
 <div style='text-align: center; color: rgba(255,255,255,0.6); padding: 2rem; margin-top: 3rem; border-top: 1px solid rgba(255,255,255,0.2);'>
-    <p>🐛 <strong>BharatPest Control Dashboard</strong> • Professional Business Management</p>
-    <p>Track • Analyze • Optimize your pest control operations</p>
-    <p><em>Data persists during your session • Add your records to see live updates</em></p>
+    <p>🐛 <strong>BharatPest Control Dashboard</strong> • Live Demo Version</p>
+    <p>Your real business data • Professional analytics • Modern interface</p>
+    <p><em>Ready for production deployment with persistent database solutions</em></p>
 </div>
 """, unsafe_allow_html=True)
