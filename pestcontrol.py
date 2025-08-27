@@ -4,15 +4,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import shutil
 import os
 
 # Initialize session state FIRST
 if 'show_add_form' not in st.session_state:
     st.session_state.show_add_form = False
-
-if 'db_initialized' not in st.session_state:
-    st.session_state.db_initialized = False
 
 # Page configuration
 st.set_page_config(
@@ -22,54 +18,7 @@ st.set_page_config(
     page_icon="🐛"
 )
 
-# Database setup with demo data preservation
-@st.cache_resource
-def init_database_with_demo_data():
-    """Initialize database, preserving demo data from repo"""
-    
-    # Check if we need to restore demo data
-    demo_db_path = 'pestcontrol_demo.db'  # Your original DB renamed
-    active_db_path = 'pestcontrol.db'
-    
-    # If active DB doesn't exist and demo DB does, copy it
-    if not os.path.exists(active_db_path) and os.path.exists(demo_db_path):
-        shutil.copy2(demo_db_path, active_db_path)
-        st.toast("📊 Demo database loaded successfully!", icon="✅")
-    
-    # Connect to database
-    conn = sqlite3.connect(active_db_path, check_same_thread=False)
-    c = conn.cursor()
-    
-    # Create table if it doesn't exist
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            phone TEXT,
-            address TEXT,
-            service TEXT,
-            visit_date TEXT,
-            amount REAL,
-            paid INTEGER DEFAULT 0,
-            payment_method TEXT,
-            service_status TEXT DEFAULT 'Ongoing',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Update old status values for compatibility
-    try:
-        c.execute("UPDATE customers SET service_status = 'Completed' WHERE service_status = 'Finished'")
-        conn.commit()
-    except:
-        pass
-    
-    return conn, c
-
-# Initialize database
-conn, c = init_database_with_demo_data()
-
-# Custom CSS (same as before)
+# Custom CSS for COVID-19 dashboard style
 st.markdown("""
 <style>
     /* Global dark theme */
@@ -107,14 +56,13 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     
-    .demo-info {
-        text-align: center;
+    .debug-info {
         background: rgba(76, 175, 80, 0.2);
         color: #81c784;
-        padding: 0.8rem;
-        border-radius: 10px;
+        padding: 0.5rem;
+        border-radius: 8px;
         font-size: 0.9rem;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
         border: 1px solid rgba(129, 199, 132, 0.3);
     }
     
@@ -246,38 +194,108 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Load data function
-@st.cache_data
-def load_data():
-    """Load data from SQLite database"""
+# Database connection function
+def get_database_connection():
+    """Get database connection and handle errors"""
     try:
+        # Check if database file exists
+        db_path = 'pestcontrol.db'
+        if not os.path.exists(db_path):
+            st.error(f"❌ Database file not found: {db_path}")
+            st.info("Please make sure 'pestcontrol.db' is in the same folder as your app.py file")
+            return None, None
+        
+        # Connect to database
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        c = conn.cursor()
+        
+        # Check if customers table exists
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='customers'")
+        if not c.fetchone():
+            st.error("❌ 'customers' table not found in database")
+            return None, None
+        
+        return conn, c
+    
+    except Exception as e:
+        st.error(f"❌ Database connection error: {str(e)}")
+        return None, None
+
+# Load data function
+def load_data():
+    """Load data from database with error handling"""
+    conn, c = get_database_connection()
+    
+    if conn is None:
+        return pd.DataFrame()
+    
+    try:
+        # Get table info
+        c.execute("PRAGMA table_info(customers)")
+        columns = c.fetchall()
+        
+        # Load all data
         df = pd.read_sql_query("SELECT * FROM customers ORDER BY id DESC", conn)
-        if not df.empty:
+        
+        if df.empty:
+            st.warning("⚠️ Database is connected but contains no records")
+            return df
+        
+        # Convert date columns
+        if 'visit_date' in df.columns:
             df["visit_date"] = pd.to_datetime(df["visit_date"], errors='coerce')
             df["month"] = df["visit_date"].dt.month
             df["year"] = df["visit_date"].dt.year
-            df["day_name"] = df["visit_date"].dt.day_name()
+        
+        # Fix old status values
+        if 'service_status' in df.columns:
+            df['service_status'] = df['service_status'].replace('Finished', 'Completed')
+        
         return df
+        
     except Exception as e:
-        st.error(f"Database error: {str(e)}")
+        st.error(f"❌ Error loading data: {str(e)}")
         return pd.DataFrame()
+    
+    finally:
+        if conn:
+            conn.close()
 
 # Main header
 st.markdown('''
 <div class="main-header">BharatPest Control</div>
 <div class="sub-header">Business Performance Dashboard</div>
-''', unsafe_allow_html=True)
-
-# Demo info banner
-st.markdown('''
-<div class="demo-info">
-    🎯 <strong>Live Demo Dashboard</strong> • Real business data included • Add new customers to test functionality
-</div>
-''', unsafe_allow_html=True)
-
-st.markdown('''
 <div class="last-updated">Last Updated: {} 00:01 (IST)</div>
 '''.format(datetime.now().strftime("%B %d, %Y")), unsafe_allow_html=True)
+
+# Database status check
+db_path = 'pestcontrol.db'
+if os.path.exists(db_path):
+    file_size = os.path.getsize(db_path)
+    st.markdown(f'''
+    <div class="debug-info">
+        ✅ <strong>Database Status:</strong> Found pestcontrol.db ({file_size:,} bytes) • 
+        Loading your business data...
+    </div>
+    ''', unsafe_allow_html=True)
+else:
+    st.markdown('''
+    <div class="debug-info">
+        ❌ <strong>Database Status:</strong> pestcontrol.db not found in current directory
+    </div>
+    ''', unsafe_allow_html=True)
+
+# Load data
+df = load_data()
+
+# Show data loading status
+if not df.empty:
+    st.markdown(f'''
+    <div class="debug-info">
+        📊 <strong>Data Loaded Successfully:</strong> {len(df)} records found • 
+        Showing your real business data
+    </div>
+    ''', unsafe_allow_html=True)
 
 # Add/Hide Customer Form Toggle
 col1, col2, col3 = st.columns([1, 1, 1])
@@ -332,8 +350,9 @@ if st.session_state.show_add_form:
             if st.form_submit_button("🔄 Reset Form", use_container_width=True):
                 st.rerun()
 
-        if submitted:
-            if name.strip():
+        if submitted and name.strip():
+            conn, c = get_database_connection()
+            if conn:
                 try:
                     c.execute('''
                         INSERT INTO customers (name, phone, address, service, visit_date, amount, paid, payment_method, service_status)
@@ -346,37 +365,32 @@ if st.session_state.show_add_form:
                     conn.commit()
                     st.success("✅ Record saved successfully!")
                     st.balloons()
-                    load_data.clear()  # Clear cache to refresh data
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error saving record: {str(e)}")
-            else:
-                st.error("❌ Please enter customer name")
+                finally:
+                    conn.close()
+        elif submitted:
+            st.error("❌ Please enter customer name")
     
     st.markdown('</div>', unsafe_allow_html=True)
-
-# Load and display data
-df = load_data()
-
-# Rest of your dashboard code (KPIs, charts, customer records, etc.)
-# [Include all the existing dashboard code from the previous version]
 
 if df.empty:
     st.markdown("""
     <div style='text-align: center; padding: 3rem; color: rgba(255,255,255,0.8);'>
-        <h2>📊 Welcome to BharatPest Control Dashboard</h2>
-        <p>Click "Add New Customer" above to get started!</p>
-        <p><em>Database is ready - your data will be saved during this session</em></p>
+        <h2>📊 No Data Found</h2>
+        <p>Please check that your pestcontrol.db file is in the same folder as app.py</p>
+        <p>Or click "Add New Customer" to create your first record</p>
     </div>
     """, unsafe_allow_html=True)
     st.stop()
 
 # Calculate metrics
 total_contracts = len(df)
-total_revenue = df['amount'].sum()
-total_paid = df.loc[df['paid'] == 1, 'amount'].sum()
-total_pending = df.loc[df['paid'] == 0, 'amount'].sum()
-completed_count = len(df[df['service_status'] == 'Completed'])
+total_revenue = df['amount'].sum() if 'amount' in df.columns else 0
+total_paid = df.loc[df['paid'] == 1, 'amount'].sum() if 'paid' in df.columns and 'amount' in df.columns else 0
+total_pending = df.loc[df['paid'] == 0, 'amount'].sum() if 'paid' in df.columns and 'amount' in df.columns else 0
+completed_count = len(df[df['service_status'] == 'Completed']) if 'service_status' in df.columns else 0
 
 # Key Performance Indicators
 st.markdown('<div class="section-header">📊 Business Overview</div>', unsafe_allow_html=True)
@@ -428,105 +442,139 @@ with col1:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
     st.markdown('<div class="chart-title">Service Distribution</div>', unsafe_allow_html=True)
     
-    service_counts = df['service'].value_counts()
+    if 'service' in df.columns:
+        service_counts = df['service'].value_counts()
+        
+        fig_donut = go.Figure(data=[go.Pie(
+            labels=service_counts.index,
+            values=service_counts.values,
+            hole=0.6,
+            marker=dict(
+                colors=['#ffb74d', '#f06292', '#64b5f6', '#81c784', '#ba68c8', '#4db6ac', '#ff8a65'],
+                line=dict(color='rgba(255,255,255,0.8)', width=2)
+            ),
+            textfont=dict(color='white', size=12),
+            hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+        )])
+        
+        fig_donut.add_annotation(
+            text=f"<b>Total</b><br>{len(df):,}",
+            x=0.5, y=0.5,
+            font_size=16,
+            font_color='white',
+            showarrow=False
+        )
+        
+        fig_donut.update_layout(
+            showlegend=True,
+            legend=dict(font=dict(color='white', size=10)),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=350,
+            margin=dict(l=20, r=20, t=20, b=20)
+        )
+        
+        st.plotly_chart(fig_donut, use_container_width=True)
+    else:
+        st.info("Service data not available")
     
-    fig_donut = go.Figure(data=[go.Pie(
-        labels=service_counts.index,
-        values=service_counts.values,
-        hole=0.6,
-        marker=dict(
-            colors=['#ffb74d', '#f06292', '#64b5f6', '#81c784', '#ba68c8', '#4db6ac', '#ff8a65'],
-            line=dict(color='rgba(255,255,255,0.8)', width=2)
-        ),
-        textfont=dict(color='white', size=12),
-        hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
-    )])
-    
-    fig_donut.add_annotation(
-        text=f"<b>Total</b><br>{len(df):,}",
-        x=0.5, y=0.5,
-        font_size=16,
-        font_color='white',
-        showarrow=False
-    )
-    
-    fig_donut.update_layout(
-        showlegend=True,
-        legend=dict(font=dict(color='white', size=10)),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=350,
-        margin=dict(l=20, r=20, t=20, b=20)
-    )
-    
-    st.plotly_chart(fig_donut, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
     st.markdown('<div class="chart-title">Payment Status Overview</div>', unsafe_allow_html=True)
     
-    payment_counts = df['paid'].value_counts()
-    payment_labels = ['Paid' if x == 1 else 'Unpaid' for x in payment_counts.index]
+    if 'paid' in df.columns:
+        payment_counts = df['paid'].value_counts()
+        payment_labels = ['Paid' if x == 1 else 'Unpaid' for x in payment_counts.index]
+        
+        fig_payment = go.Figure(data=[go.Bar(
+            x=payment_labels,
+            y=payment_counts.values,
+            marker_color=['#81c784', '#f06292'],
+            text=payment_counts.values,
+            textposition='auto',
+            textfont=dict(color='white', size=14, family="Arial Black")
+        )])
+        
+        fig_payment.update_layout(
+            xaxis=dict(title='Payment Status', color='white'),
+            yaxis=dict(title='Number of Customers', color='white'),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=350,
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig_payment, use_container_width=True)
+    else:
+        st.info("Payment data not available")
     
-    fig_payment = go.Figure(data=[go.Bar(
-        x=payment_labels,
-        y=payment_counts.values,
-        marker_color=['#81c784', '#f06292'],
-        text=payment_counts.values,
-        textposition='auto',
-        textfont=dict(color='white', size=14, family="Arial Black")
-    )])
-    
-    fig_payment.update_layout(
-        xaxis=dict(title='Payment Status', color='white'),
-        yaxis=dict(title='Number of Customers', color='white'),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=350,
-        showlegend=False
-    )
-    
-    st.plotly_chart(fig_payment, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Customer Records Management
-st.markdown('<div class="section-header">📋 Recent Customer Records</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">📋 Customer Records</div>', unsafe_allow_html=True)
 
-# Show top 10 most recent records
-recent_records = df.head(10)
-
-if not recent_records.empty:
-    for idx, row in recent_records.iterrows():
-        with st.expander(f"🏠 {row['name']} • {row['phone']} • ₹{row['amount']:,.0f} • {row['service_status']}"):
+# Show records with expandable details
+if not df.empty:
+    for idx, row in df.head(15).iterrows():  # Show first 15 records
+        # Create a safe display for missing columns
+        name = row.get('name', 'Unknown')
+        phone = row.get('phone', 'No phone')
+        amount = row.get('amount', 0)
+        service_status = row.get('service_status', 'Unknown')
+        
+        with st.expander(f"🏠 {name} • {phone} • ₹{amount:,.0f} • {service_status}"):
             col1, col2 = st.columns([3, 1])
             
             with col1:
-                visit_date_str = row['visit_date'].strftime('%Y-%m-%d') if pd.notnull(row['visit_date']) else 'N/A'
-                payment_status = "✅ Paid" if row['paid'] else "❌ Unpaid"
+                visit_date_str = 'N/A'
+                if 'visit_date' in row and pd.notnull(row['visit_date']):
+                    try:
+                        visit_date_str = pd.to_datetime(row['visit_date']).strftime('%Y-%m-%d')
+                    except:
+                        visit_date_str = str(row['visit_date'])
+                
+                payment_status = "✅ Paid" if row.get('paid', 0) == 1 else "❌ Unpaid"
                 
                 st.markdown(f"""
-                **🛡️ Service:** {row['service']}  
+                **🛡️ Service:** {row.get('service', 'Not specified')}  
                 **📅 Visit Date:** {visit_date_str}  
-                **📍 Address:** {row['address'] or 'Not provided'}  
-                **💳 Payment:** {payment_status} via {row['payment_method']}  
-                **📊 Status:** `{row['service_status']}`  
-                **💰 Amount:** ₹{row['amount']:,.2f}
+                **📍 Address:** {row.get('address', 'Not provided')}  
+                **💳 Payment:** {payment_status} via {row.get('payment_method', 'Unknown')}  
+                **📊 Status:** `{service_status}`  
+                **💰 Amount:** ₹{amount:,.2f}
                 """)
             
             with col2:
-                st.info("👁️ **Demo Mode**\n\nRecord updates available in full version")
+                # Update functionality
+                if st.button(f"🔄 Edit Record", key=f"edit_{row.get('id', idx)}", use_container_width=True):
+                    st.info("Record editing available in full version")
+
+    # Show total record count
+    if len(df) > 15:
+        st.markdown(f"<div style='color: rgba(255,255,255,0.6); text-align: center; margin: 2rem 0;'>Showing first 15 records. Total: {len(df)} records in database.</div>", unsafe_allow_html=True)
 
 # Sidebar with stats
 with st.sidebar:
     st.markdown('<div style="background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center; color: white; font-weight: 600;">📊 Quick Stats</div>', unsafe_allow_html=True)
     
     if not df.empty:
-        pending_payments = df[df['paid'] == 0]['amount'].sum()
-        recent_customers = len(df[df['visit_date'] >= (datetime.now() - timedelta(days=7))])
+        # Safe calculations for sidebar
+        pending_payments = 0
+        recent_customers = 0
+        
+        if 'paid' in df.columns and 'amount' in df.columns:
+            pending_payments = df[df['paid'] == 0]['amount'].sum()
+        
+        if 'visit_date' in df.columns:
+            try:
+                recent_customers = len(df[pd.to_datetime(df['visit_date'], errors='coerce') >= (datetime.now() - timedelta(days=7))])
+            except:
+                recent_customers = 0
         
         st.metric("💰 Pending Payments", f"₹{pending_payments:,.0f}")
-        st.metric("📅 This Week's Customers", f"{recent_customers}")
+        st.metric("📊 Total Records", f"{len(df)}")
         st.metric("🎯 Completion Rate", f"{(completed_count/total_contracts*100):.1f}%" if total_contracts > 0 else "0%")
         
         # Export functionality
@@ -543,8 +591,7 @@ with st.sidebar:
 # Footer
 st.markdown("""
 <div style='text-align: center; color: rgba(255,255,255,0.6); padding: 2rem; margin-top: 3rem; border-top: 1px solid rgba(255,255,255,0.2);'>
-    <p>🐛 <strong>BharatPest Control Dashboard</strong> • Live Demo Version</p>
-    <p>Your real business data • Professional analytics • Modern interface</p>
-    <p><em>Ready for production deployment with persistent database solutions</em></p>
+    <p>🐛 <strong>BharatPest Control Dashboard</strong> • Live Business Data</p>
+    <p>Your real pest control business • Professional analytics • Modern interface</p>
 </div>
 """, unsafe_allow_html=True)
